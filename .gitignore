@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Data
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+.docker/
+
+# Generated protobuf
+*_pb2.py
+
+# Pytest
+.pytest_cache/
+tests/__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db

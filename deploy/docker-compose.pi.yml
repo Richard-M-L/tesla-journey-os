@@ -1,0 +1,39 @@
+# Tesla Journey OS — Docker Compose for Raspberry Pi (ARM64/ARMv7)
+#
+# Overrides the main docker-compose.yml for ARM architecture.
+# Usage: docker compose -f docker-compose.yml -f deploy/docker-compose.pi.yml up -d
+#
+# For Pi Zero 2 W (ARMv7 / 32-bit):
+#   - Runs backend only (not enough RAM for Node.js dev server)
+#   - Pre-build frontend on a faster machine and serve via nginx
+
+services:
+  backend:
+    platform: linux/arm64
+    # For Pi Zero 2 W (32-bit ARMv7), use:
+    # platform: linux/arm/v7
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  frontend:
+    platform: linux/arm64
+    # Comment out frontend on Pi Zero 2 W (not enough RAM)
+    # Use a pre-built static frontend served by nginx instead
+
+  # Static file server for pre-built frontend (alternative to Node dev server)
+  # Uncomment on low-RAM devices:
+  # nginx:
+  #   image: nginx:alpine
+  #   platform: linux/arm64
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./frontend/dist:/usr/share/nginx/html:ro
+  #     - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped

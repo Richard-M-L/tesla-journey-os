@@ -1,0 +1,106 @@
+# Tesla Journey OS — Unified Configuration
+# Local-first, single-user, single-vehicle digital twin platform
+
+# ---- Data Sources ----
+ingestion:
+  watch_dir: "/mnt/tjos_gadget/part1-ro/TeslaCam"  # TeslaCam RO mount (USB gadget mode)
+  archive_dir: "./data/archived"        # Durable clip storage
+  import_dir: "./data/import"           # Manual CSV/JSON import drop zone
+  sample_rate: 30                       # Frames per second to sample (Tesla default: 30)
+
+# ---- USB Gadget (Raspberry Pi) ----
+usb_gadget:
+  enabled: true                         # Enable USB mass storage gadget mode
+  gadget_name: tesla_journey            # ConfigFS gadget directory name
+  mount_dir: /mnt/tjos_gadget           # RO mount point for local file access
+  images_dir: "./data/images"           # Where disk images are stored
+  images:
+    cam:
+      name: usb_cam.img                 # TeslaCam disk image (exFAT)
+      size: "64G"                       # Size for dashcam footage
+      label: TeslaCam
+      filesystem: exfat
+    lightshow:
+      name: usb_lightshow.img           # LightShow disk image (FAT32)
+      size: "4G"
+      label: LightShow
+      filesystem: fat32
+    music:
+      name: usb_music.img               # Music disk image (FAT32)
+      size: "32G"
+      label: Music
+      filesystem: fat32
+      enabled: true
+
+# ---- Trip Detection ----
+trip:
+  gap_minutes: 5                        # Max gap between trips before splitting
+  min_duration_seconds: 60             # Minimum trip duration (shorter = noise)
+  min_distance_km: 0.1                 # Minimum trip distance
+  stationary_speed_mps: 0.5            # Below this speed = stationary
+  stationary_timeout_seconds: 180      # Stationary this long = trip end
+
+# ---- Event Detection ----
+events:
+  emergency_brake:
+    enabled: true
+    threshold_ms2: -7.0               # Longitudinal acceleration (m/s^2)
+  harsh_brake:
+    enabled: true
+    threshold_ms2: -4.0
+  hard_acceleration:
+    enabled: true
+    threshold_ms2: 3.5
+  sharp_turn:
+    enabled: true
+    threshold_ms2: 4.0                # Lateral acceleration (m/s^2)
+  speeding:
+    enabled: true
+    threshold_mps: 35.76              # ~80 mph / ~129 km/h
+  autopilot_disengage:
+    enabled: true
+  battery_low:
+    enabled: true
+    threshold_pct: 10
+
+# ---- Storage ----
+storage:
+  database_path: "./data/tjos.db"
+  geodata_path: "./data/geodata.db"
+  wal_checkpoint_interval: 300         # Seconds between WAL checkpoints
+
+# ---- Web Server ----
+web:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"          # Vite dev server
+
+# ---- Archive ----
+archive:
+  retry_attempts: 3
+  retry_delay_seconds: 60
+  stable_write_age: 30                 # Seconds file must be unchanged
+
+# ---- Offline AP (Hotspot) ----
+offline_ap:
+  enabled: true                         # Enable fallback AP when WiFi is lost
+  ssid: "Tesla Journey OS"              # SSID broadcast when AP is active
+  passphrase: ""                        # WPA2 passphrase (8-63 chars, empty = open)
+  channel: 6                            # 2.4GHz channel (1-11)
+  interface: wlan0                      # WiFi interface
+  ipv4_cidr: "192.168.4.1/24"          # Static IP for AP interface
+  dhcp_start: "192.168.4.10"           # DHCP range start
+  dhcp_end: "192.168.4.50"             # DHCP range end
+  check_interval: 20                    # Seconds between health checks
+  disconnect_grace: 30                  # Seconds offline before starting AP
+  min_rssi: -70                        # Minimum RSSI (dBm) to tear down AP
+  stable_seconds: 20                    # Seconds of good link before stopping AP
+  ping_target: "8.8.8.8"              # Ping target to confirm WAN reachability
+  retry_seconds: 300                    # While AP active, retry STA join every N seconds
+  virtual_interface: uap0              # Virtual AP interface name (concurrent mode)
+  force_mode: auto                     # Persistent force mode: auto, force_on, force_off
+
+# ---- Frontend ----
+frontend:
+  port: 5173

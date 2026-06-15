@@ -1,0 +1,71 @@
+# Tesla Journey OS — Docker Compose
+# Local-first, single-user, single-vehicle digital twin platform.
+#
+# Usage:
+#   docker compose up -d          # Start both services
+#   docker compose up backend      # Backend only (API + DB)
+#   docker compose up frontend     # Frontend only (dev server)
+#
+# Data is persisted in ./data on the host.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: tjos-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - ./backend/app:/app/app:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: tjos-frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend/src:/app/src:ro
+    environment:
+      - VITE_API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Optional: scheduled tasks (WAL checkpoints, etc.)
+  scheduler:
+    build:
+      context: ./backend
+    container_name: tjos-scheduler
+    command:
+      - python
+      - -c
+      - |
+        import asyncio
+        import sys
+        sys.path.insert(0, '/app')
+        from app.database import init_db
+        from app.modules.storage import run_checkpoint
+        init_db()
+        async def loop():
+            while True:
+                await asyncio.sleep(300)
+                await run_checkpoint()
+        asyncio.run(loop())
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - ./backend/app:/app/app:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
