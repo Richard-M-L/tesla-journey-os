@@ -16,6 +16,7 @@ import { BoomboxPage } from "@/pages/BoomboxPage";
 import { StoragePage } from "@/pages/StoragePage";
 import { UsbSettingsPage } from "@/pages/UsbSettingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { UpdatePage } from "@/pages/UpdatePage";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/storage" element={<StoragePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/usb" element={<UsbSettingsPage />} />
+        <Route path="/settings/updates" element={<UpdatePage />} />
       </Routes>
     </AppLayout>
   );

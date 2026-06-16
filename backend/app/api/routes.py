@@ -856,3 +856,31 @@ async def export_to_usb(request: Request):
 
     from app.modules.media.export import export_to_usb as _export
     return _export(target, dry_run=dry_run)
+
+
+# ── Updates ──────────────────────────────────────────
+
+@router.get("/system/version")
+def get_version():
+    from app.modules.updater import get_current_version, get_current_commit
+    return {
+        "version": get_current_version(),
+        "commit": get_current_commit(),
+    }
+
+
+@router.get("/system/updates/check")
+def check_updates(force: bool = False):
+    from app.modules.updater import check_for_updates
+    return check_for_updates(force=force)
+
+
+@router.post("/system/updates/apply")
+async def apply_updates():
+    """Pull latest code and restart. Takes ~30s. Returns step-by-step progress."""
+    from app.modules.updater import apply_updates as _apply
+    # Run in thread — git pull + pip install + restart is blocking
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        future = pool.submit(_apply)
+        return future.result(timeout=120)

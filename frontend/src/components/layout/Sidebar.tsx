@@ -15,6 +15,7 @@ import {
   Image,
   FileText,
   Volume2,
+  Download,
   Usb,
   Settings,
   ChevronDown,
@@ -129,17 +130,48 @@ export function Sidebar() {
 
         {/* Settings section */}
         <div className="pt-2 mt-2 border-t border-tesla-gray-800">
-          <NavLink
-            to="/settings"
-            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              location.pathname.startsWith("/settings")
-                ? "bg-tesla-gray-800 text-white"
-                : "text-tesla-gray-400 hover:text-white hover:bg-tesla-gray-800/50"
-            }`}
+          <button
+            onClick={() => {
+              const el = document.getElementById("settings-sub");
+              if (el) el.classList.toggle("hidden");
+            }}
+            className="flex items-center justify-between w-full px-3 py-2 text-xs uppercase tracking-wider text-tesla-gray-500 hover:text-tesla-gray-300 transition-colors"
           >
-            <Settings className="w-4 h-4" />
-            设置
-          </NavLink>
+            <div className="flex items-center gap-3">
+              <Settings className="w-4 h-4" />
+              <span>设置</span>
+            </div>
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          <div id="settings-sub" className="mt-1 space-y-1">
+            <NavLink
+              to="/settings"
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname === "/settings"
+                  ? "bg-tesla-gray-800 text-white"
+                  : "text-tesla-gray-400 hover:text-white hover:bg-tesla-gray-800/50"
+              }`}
+            >WiFi & 高级</NavLink>
+            <NavLink
+              to="/settings/usb"
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname === "/settings/usb"
+                  ? "bg-tesla-gray-800 text-white"
+                  : "text-tesla-gray-400 hover:text-white hover:bg-tesla-gray-800/50"
+              }`}
+            >USB 设置</NavLink>
+            <NavLink
+              to="/settings/updates"
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname === "/settings/updates"
+                  ? "bg-tesla-gray-800 text-white"
+                  : "text-tesla-gray-400 hover:text-white hover:bg-tesla-gray-800/50"
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              系统更新
+            </NavLink>
+          </div>
         </div>
       </nav>
 
