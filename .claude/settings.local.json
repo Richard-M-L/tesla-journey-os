@@ -60,7 +60,14 @@
       "Bash(gh --version)",
       "Bash(gh auth *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh repo *)",
+      "Bash(sshpass *)",
+      "Bash(PYTHONPATH=\"C:/Users/Richard/OneDrive/Desktop/Tesla Journey OS/backend\" \"C:/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe\" -m uvicorn app.main:app --host 0.0.0.0 --port 8002)",
+      "Bash(curl -s http://localhost:8002/api/stats)",
+      "Bash(curl -s http://localhost:8002/api/trips)",
+      "Bash(git push *)"
     ]
   }
 }

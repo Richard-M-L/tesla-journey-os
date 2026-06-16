@@ -11,15 +11,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Proxy for local dev only. Production uses Nginx.
     proxy: {
-      "/api": {
-        target: "http://localhost:8001",
-        changeOrigin: true,
-      },
-      "/health": {
-        target: "http://localhost:8001",
-        changeOrigin: true,
-      },
+      "/api": "http://localhost:8000",
+      "/health": "http://localhost:8000",
     },
   },
 });

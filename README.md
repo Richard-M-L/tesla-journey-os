@@ -1,285 +1,144 @@
 # Tesla Journey OS
 
-**Local-first driving behavior analysis platform for Tesla vehicles. GPS is optional.**
+**树莓派车载固件。插在 Tesla USB 口，模拟 U 盘保存行车记录，同时提供驾驶行为分析和媒体管理 Web 界面。**
 
-Turn your Raspberry Pi into a digital twin for your Tesla. Plug it into the car's USB port — it appears as a USB drive, captures dashcam footage, extracts telemetry, detects trips and driving events, and provides a rich web dashboard. All processing happens locally. No cloud required.
+只有一个前提：**树莓派插在车的 USB 口上**。没有这个前提，这个项目没有意义。
 
-## Why
+车往树莓派写行车记录视频 → 树莓派自动解析遥测数据 → 检测行程和驾驶事件 → 生成评分和图表。所有处理在 Pi 上本地完成。
 
-Tesla vehicles in China and certain regions cannot access GPS telemetry. Tesla Journey OS was built from the ground up to work without GPS — trip detection relies on speed, gear state, and timestamps instead of coordinates. Every feature gracefully degrades when GPS is unavailable.
+## 为什么不用 GPS
 
-## Features
+Tesla 在中国及部分地区的车辆无法获取 GPS 遥测。TJOS 从设计上就不依赖 GPS——行程检测用速度、档位、时间戳；距离计算在无 GPS 时自动回退到速度×时间积分；所有界面在 GPS 不可用时优雅降级。
 
-### Core Pipeline
-- **SEI Telemetry Extraction** — Parses protobuf-encoded telemetry from Tesla dashcam MP4 files using memory-mapped I/O (safe on Pi Zero 2 W with 512MB RAM)
-- **Trip Detection** — Identifies driving sessions from speed transitions, gear changes, and time gaps — no GPS needed
-- **Event Detection** — Detects emergency braking, harsh braking, hard acceleration, sharp turns, speeding, and autopilot disengagement from per-frame acceleration data
-- **Distance Estimation** — Falls back to speed×time integration when GPS coordinates are unavailable
+## 硬件要求
 
-### USB Gadget Mode
-- Presents the Pi as **3 USB mass storage devices** to the car (TeslaCam RW, LightShow RO, Music RO)
-- Tesla writes dashcam footage directly to the Pi
-- Pi simultaneously reads and processes footage while the car records
-- Present/Edit mode switching via web UI or shell scripts
+- Raspberry Pi Zero 2 W / 3 / 4 / 5
+- MicroSD 卡（16GB 起步，建议 64GB+）
+- USB 数据线连接 Pi 和 Tesla
+- Raspberry Pi OS Bookworm
 
-### Web Dashboard
-- **Dashboard** — Trip count, driving score, energy efficiency, GPS coverage
-- **Timeline** — Chronological trip list with stats preview
-- **Trip Details** — Speed profile chart, waypoint list, event markers
-- **Events** — Filterable event log by type and severity
-- **Statistics** — Charts for daily trips, battery trends, driving score
-- **Video Browser** — Stream dashcam videos with real-time HUD telemetry overlay (speed, gear, AP state, brake, blinkers, steering angle)
-- **Storage Analytics** — Disk usage pie charts, per-folder breakdown, recording time estimates
-- **Map** — Optional Leaflet map view (gracefully hidden when GPS unavailable)
-
-### Media Management
-- **Lock Chimes** — Upload, validate, normalize WAV files with scheduling and chime groups
-- **Light Shows** — Extract and manage .fseq + audio files from ZIP archives
-- **Music** — Upload MP3/FLAC/WAV/AAC/M4A files
-- **Boombox** — Manage up to 5 custom external speaker sounds
-- **Custom Wraps** — Validate and manage Tesla car wrap PNG images
-- **License Plates** — Manage custom license plate images (NA/EU formats)
-- **USB Export** — One-click sync all media to a USB drive for the car
-
-### Connectivity
-- **WiFi Manager** — Scan, connect, saved networks, signal strength
-- **Offline Hotspot** — Automatic fallback AP when WiFi drops (in-car access)
-- **Captive Portal** — Intercepts OS detection probes (Apple/Android/Windows/Firefox), redirects to dashboard
-- **Settings** — WiFi config, AP SSID/password, advanced tuning (event thresholds, trip parameters)
-
-### System Protection
-- **Hardware Watchdog** — `/dev/watchdog` feeding with systemd integration (Pi reboots if app hangs)
-- **Safe Mode** — Detects 3+ system reboots in 10 minutes → disables heavy services, keeps SSH + AP alive
-- **Task Coordinator** — Global lock prevents concurrent SDIO-heavy operations on Pi Zero 2 W
-- **File Safety Guards** — Prevents accidental deletion of disk images and database files
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   Raspberry Pi                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-│  │ usb_cam  │  │ usb_ls   │  │ usb_music        │  │
-│  │ .img     │  │ .img     │  │ .img             │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────────────┘  │
-│       └──────────────┼─────────────┘                 │
-│                 ConfigFS Gadget                       │
-│                 (3 LUNs via USB)                      │
-└──────────────────────┬──────────────────────────────┘
-                       │ USB cable
-                   ┌───▼────┐
-                   │  Tesla │
-                   └────────┘
-
-Backend:  Python 3 + FastAPI + SQLAlchemy + SQLite
-          └── Event Bus (async pub/sub, no Redis/MQ)
-
-Frontend: React + TypeScript + Tailwind CSS + Recharts + Leaflet
-
-Deploy:   Docker Compose or bare-metal systemd
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Raspberry Pi (Zero 2 W, 3, 4, or 5) running Raspberry Pi OS Bookworm
-- MicroSD card (16GB minimum, 64GB+ recommended)
-- USB cable to connect Pi to Tesla
-
-### One-Command Install
+## 安装
 
 ```bash
-# Copy project to Pi
-rsync -av --exclude 'node_modules' --exclude '__pycache__' \
-  ./ pi@<pi-ip>:/opt/tesla-journey-os/
-
-# SSH in and install
-ssh pi@<pi-ip>
-cd /opt/tesla-journey-os
+git clone https://github.com/Richard-M-L/tesla-journey-os.git
+cd tesla-journey-os
 sudo ./deploy/install.sh
 sudo reboot
 ```
 
-The installer will:
-- Install system dependencies
-- Enable USB gadget kernel support (dwc2)
-- Create Python virtual environment
-- Build the React frontend
-- Initialize the database
-- Create USB disk images (with interactive size selection)
-- Configure Nginx reverse proxy
-- Install systemd services
-- Start everything
+安装程序会：
+1. 装系统依赖
+2. 启用 USB Gadget 内核驱动（dwc2 peripheral 模式）
+3. 创建 Python 虚拟环境并安装依赖
+4. 编译 dashcam protobuf
+5. 初始化数据库
+6. **创建 USB 磁盘镜像**（自动检测 SD 卡容量，交互式选择大小）
+7. 配置 Nginx（端口 80，API 代理，Captive Portal）
+8. 安装 systemd 服务
+9. 构建前端并启动全部服务
 
-### Custom Disk Image Sizes
+### 指定磁盘镜像大小
 
 ```bash
-# Interactive (detects free space, asks for each size)
-sudo ./deploy/install.sh
-
-# Non-interactive (TeslaCam GB, LightShow GB, Music GB)
-sudo ./deploy/install.sh 32 2 16
-
-# Skip Music partition
-sudo ./deploy/install.sh 32 2 0
+sudo ./deploy/install.sh 32 2 16   # TeslaCam 32G, LightShow 2G, Music 16G
+sudo ./deploy/install.sh 16 2 0    # 不要 Music 分区
 ```
 
-### After Install
+不带参数运行会进入交互式模式，自动检测可用空间并显示建议值。
 
-| Service | URL |
-|---------|-----|
-| Dashboard | `http://<pi-ip>` |
-| API | `http://<pi-ip>:8000` |
-| Health | `http://<pi-ip>:8000/health` |
-| Settings | `http://<pi-ip>/settings` |
+## 重启后
 
-When WiFi drops, the Pi creates a hotspot: **SSID:** `Tesla Journey OS` (no password by default). Connect and open any browser — the captive portal redirects to the dashboard.
+Pi 插到车 USB 口上，车会看到 **3 个驱动器**：
 
-### Development
+| LUN | 名称 | 权限 | 用途 |
+|-----|------|------|------|
+| 0 | TeslaCam | 读写 | 车往这里写行车记录视频 |
+| 1 | LightShow | 只读 | 车从这里读取灯光秀文件 |
+| 2 | Music | 只读 | 车从这里读取音乐/锁车音效 |
+
+视频写入后，Pi 自动提取 SEI 遥测 → 检测行程 → 检测事件。
+
+### Web 界面
+
+Pi 同时提供 WiFi 热点，手机/电脑连接后访问：
+
+| 地址 | 内容 |
+|------|------|
+| `http://192.168.4.1` | 仪表盘 |
+| `http://192.168.4.1/settings` | 设置（WiFi/热点/高级） |
+| `http://192.168.4.1/videos` | 视频浏览器（HUD 遥测叠加） |
+| `http://192.168.4.1/events` | 驾驶事件列表 |
+| `http://192.168.4.1/statistics` | 统计图表 |
+
+WiFi 可用时 Pi 自动连接；WiFi 断开时自动开启热点：**SSID:** `Tesla Journey OS`（默认无密码）。连上后打开任意浏览器自动跳转到仪表盘（Captive Portal）。
+
+## 功能
+
+**核心管道**：SEI 遥测提取（mmap protobuf 解码）→ 行程检测（speed×time，无需 GPS）→ 事件检测（急刹/急加速/急转弯/超速/AP 退出/低电量）→ 驾驶评分（0-100）
+
+**前端**：React SPA，20+ 页面。仪表盘、时间线、视频播放器（实时 HUD：速度/档位/AP/刹车/转向灯）、存储分析、地图（GPS 不可用时隐藏）
+
+**媒体管理**：锁车音效（WAV 验证+排程）、灯光秀（ZIP/FSEQ）、音乐、Boombox、车衣、车牌。一键导出到 U 盘。
+
+**系统保护**：硬件看门狗（死机自动重启）、安全模式（3 次重启/10 分钟→保活降级）、任务协调器（Pi Zero 2 W SDIO 保护）、文件安全守卫
+
+**在线更新**：Web UI → 检查 GitHub → changelog → 一键更新 → 自动重启
+
+## 项目结构
+
+```
+├── backend/app/
+│   ├── main.py              # FastAPI 入口
+│   ├── event_bus.py         # 异步事件总线
+│   ├── models/              # 8 个 SQLAlchemy 模型
+│   ├── modules/
+│   │   ├── ingestion/       # SEI parser + 文件监控
+│   │   ├── telemetry/       # 遥测摄入管道
+│   │   ├── trip/            # 行程检测引擎
+│   │   ├── event/           # 驾驶事件检测
+│   │   ├── analytics/       # 统计引擎
+│   │   ├── query/           # 读查询
+│   │   ├── usb/             # ConfigFS USB Gadget
+│   │   ├── media/           # 锁车音效/灯光秀/音乐/车衣/车牌
+│   │   ├── watchdog.py      # 硬件看门狗 + 安全模式
+│   │   ├── task_coordinator.py  # SDIO 任务协调
+│   │   └── ...
+│   └── api/routes.py        # 65 个 API 端点
+├── frontend/src/            # React + TypeScript + Tailwind
+├── deploy/
+│   ├── install.sh           # 一键安装
+│   ├── present_usb.sh       # USB Gadget: Present 模式
+│   ├── edit_usb.sh          # USB Gadget: Edit 模式
+│   └── wifi-monitor.sh      # WiFi 监控 + 热点回退
+├── tests/                   # pytest
+└── config.yaml              # 统一配置
+```
+
+## 开发
 
 ```bash
-# Backend
-cd backend
-pip install -r requirements.txt
+# 后端
+cd backend && pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
-# Frontend
-cd frontend
-npm install
-npm run dev           # → http://localhost:5173
+# 前端（开发时用 Vite dev server，生产用 Nginx 服务 dist/）
+cd frontend && npm install && npm run dev
 
-# Tests
+# 测试
 pytest tests/ -v
 ```
 
-## GPS Handling
+## 与 TeslaUSB 的关系
 
-Every component checks for GPS availability and degrades gracefully:
+本项目受 [TeslaUSB](https://github.com/cimryan/teslausb) 启发，是其架构思想的延续。核心差异：
 
-| Component | With GPS | Without GPS |
-|-----------|----------|-------------|
-| Trip Detection | Haversine distance | Speed × time integration |
-| Map | Leaflet with polylines | Hidden, shows explanation |
-| Events | Geo-tagged | Timestamp-tagged |
-| Dashboard | GPS coverage % shown | Banner: "GPS unavailable" |
-| Video HUD | Coordinates display | "No GPS" indicator |
-
-## Project Structure
-
-```
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── config.py            # YAML config loader
-│   │   ├── database.py          # SQLAlchemy engine
-│   │   ├── event_bus.py         # Async pub/sub
-│   │   ├── models/              # ORM models (8 tables)
-│   │   ├── modules/
-│   │   │   ├── ingestion/       # SEI parser + file watcher
-│   │   │   ├── telemetry/       # Ingestion pipeline
-│   │   │   ├── trip/            # Trip detection engine
-│   │   │   ├── event/           # Driving event detection
-│   │   │   ├── geo/             # Reverse geocoding
-│   │   │   ├── analytics/       # Statistics engine
-│   │   │   ├── archive/         # File archival
-│   │   │   ├── storage/         # DB maintenance
-│   │   │   ├── query/           # Read queries
-│   │   │   ├── usb/             # ConfigFS gadget manager
-│   │   │   ├── media/           # Lock chimes, light shows, etc.
-│   │   │   ├── wifi.py          # WiFi management (nmcli)
-│   │   │   ├── ap.py            # Access point service
-│   │   │   ├── video.py         # Video streaming + telemetry
-│   │   │   ├── storage_analytics.py
-│   │   │   ├── task_coordinator.py
-│   │   │   ├── watchdog.py      # Hardware watchdog + safe mode
-│   │   │   ├── file_safety.py
-│   │   │   └── captive_portal.py
-│   │   └── api/routes.py        # 62 REST endpoints
-│   └── scan.py                  # CLI bulk video scanner
-├── frontend/
-│   └── src/
-│       ├── pages/               # 20+ page components
-│       ├── components/          # Layout, sidebar, etc.
-│       ├── hooks/               # Custom React hooks
-│       ├── lib/                 # API client, utilities
-│       └── types/               # TypeScript definitions
-├── deploy/
-│   ├── install.sh               # One-click Pi installer
-│   ├── present_usb.sh           # USB gadget mode: present
-│   ├── edit_usb.sh              # USB gadget mode: edit
-│   └── wifi-monitor.sh          # WiFi health + AP fallback
-├── tests/                       # pytest smoke tests
-└── config.yaml                  # Unified configuration
-```
-
-## Configuration
-
-All settings in `config.yaml`:
-
-```yaml
-ingestion:
-  watch_dir: "/mnt/tjos_gadget/part1-ro/TeslaCam"
-  sample_rate: 30
-
-trip:
-  gap_minutes: 5
-  min_duration_seconds: 60
-
-events:
-  emergency_brake:
-    threshold_ms2: -7.0
-  harsh_brake:
-    threshold_ms2: -4.0
-  hard_acceleration:
-    threshold_ms2: 3.5
-
-offline_ap:
-  ssid: "Tesla Journey OS"
-  passphrase: ""
-  channel: 6
-
-usb_gadget:
-  enabled: true
-  images:
-    cam:
-      size: "64G"
-      filesystem: exfat
-    lightshow:
-      size: "4G"
-      filesystem: fat32
-    music:
-      size: "32G"
-      filesystem: fat32
-      enabled: true
-```
-
-Settings can also be changed via the web UI at `/settings`.
-
-## API
-
-62 REST endpoints. Key groups:
-
-| Prefix | Description |
-|--------|-------------|
-| `/api/stats` | Dashboard statistics |
-| `/api/trips` | Trip listing, detail, telemetry |
-| `/api/events` | Driving events |
-| `/api/analytics` | Charts, scores, trends |
-| `/api/videos` | Browse, stream, telemetry |
-| `/api/wifi` | Scan, connect, saved networks |
-| `/api/ap` | Hotspot status, config |
-| `/api/usb` | Gadget status, mode switching |
-| `/api/media/*` | Lock chimes, light shows, music, wraps, plates, boombox |
-| `/api/storage` | Disk usage, video stats |
-| `/api/settings` | Config read/write |
-| `/api/system` | Health, safe mode, reboot history |
-| `/api/geo` | Reverse geocoding |
-| `/health` | Quick health check |
-
-## Acknowledgements
-
-Built on the foundation of [TeslaUSB](https://github.com/cimryan/teslausb), the original Raspberry Pi Tesla dashcam solution. Tesla Journey OS reimagines the concept as a telemetry-first driving behavior platform with GPS-optional architecture.
+| | TeslaUSB | Tesla Journey OS |
+|---|---|---|
+| 定位 | 行车记录仪管家 | 驾驶行为分析平台 |
+| GPS | 必需 | 可选 |
+| 前端 | Jinja2 模板 | React SPA |
+| 驾驶评分 | 无 | 有 |
+| 在线更新 | 无 | 有 |
 
 ## License
 

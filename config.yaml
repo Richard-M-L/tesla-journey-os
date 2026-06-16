@@ -101,6 +101,6 @@ offline_ap:
   virtual_interface: uap0              # Virtual AP interface name (concurrent mode)
   force_mode: auto                     # Persistent force mode: auto, force_on, force_off
 
-# ---- Frontend ----
+# ---- Frontend (served by Nginx on port 80) ----
 frontend:
-  port: 5173
+  port: 80
