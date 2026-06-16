@@ -31,7 +31,7 @@ logger = logging.getLogger("telemetry")
 
 # ── Configurable thresholds ──
 # File must be unchanged for this many seconds before processing
-STABLE_WRITE_AGE = int(os.environ.get("TJOS_STABLE_WRITE_AGE", "5"))
+STABLE_WRITE_AGE = int(os.environ.get("TJOS_STABLE_WRITE_AGE", "60"))
 
 # When peeking for stationary detection, only walk this many MB of the file
 STATIONARY_PEEK_MB = int(os.environ.get("TJOS_STATIONARY_PEEK_MB", "3"))
