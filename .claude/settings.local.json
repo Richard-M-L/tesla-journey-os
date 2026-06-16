@@ -74,7 +74,13 @@
       "Bash(bash -n deploy/install.sh)",
       "Bash(apt-get install *)",
       "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes pi@192.168.8.178 \"echo 'SSH key auth works'\")",
-      "Bash(pip install *)"
+      "Bash(pip install *)",
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(where python3 *)",
+      "Bash(/c/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe --version)",
+      "Bash(/c/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe *)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 pi@192.168.8.178 \"echo connected\")"
     ]
   }
 }
