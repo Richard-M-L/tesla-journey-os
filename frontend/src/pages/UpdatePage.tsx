@@ -12,7 +12,7 @@ interface UpdateCheck {
   latest_commit: string;
   new_commits: CommitInfo[];
   changelog: string;
-  checked_at: string;
+  checked_at: number;
   commit_count: number;
   error: string | null;
 }
@@ -172,7 +172,7 @@ export function UpdatePage() {
               <span>已是最新版本 (v{check.current_version})</span>
               {check.checked_at && (
                 <span className="text-xs text-tesla-gray-600 ml-1">
-                  (检查于 {new Date(check.checked_at).toLocaleTimeString("zh-CN")})
+                  (检查于 {new Date(check.checked_at * 1000).toLocaleTimeString("zh-CN")})
                 </span>
               )}
             </div>

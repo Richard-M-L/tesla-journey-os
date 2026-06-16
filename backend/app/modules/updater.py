@@ -73,7 +73,7 @@ def check_for_updates(force: bool = False) -> dict:
         try:
             import json, time
             cache = json.loads(_CACHE_FILE.read_text())
-            if time.time() - cache.get("checked_at", 0) < _CACHE_TTL:
+            if time.time() - float(cache.get("checked_at", 0)) < _CACHE_TTL:
                 return cache
         except (OSError, json.JSONDecodeError, ValueError):
             pass
@@ -88,7 +88,7 @@ def check_for_updates(force: bool = False) -> dict:
         "latest_commit": "",
         "new_commits": [],
         "changelog": "",
-        "checked_at": datetime.now().isoformat(),
+        "checked_at": time.time(),
         "error": None,
     }
 
