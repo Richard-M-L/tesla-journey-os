@@ -114,16 +114,20 @@ log "  System packages installed."
 log "[2/11] Enabling USB Gadget kernel support (dwc2)..."
 CONFIG_FILE="/boot/firmware/config.txt"
 if [ -f "$CONFIG_FILE" ]; then
-    # dwc2 MUST be in peripheral mode for USB gadget
-    if grep -q "dtoverlay=dwc2,dr_mode=peripheral" "$CONFIG_FILE" 2>/dev/null; then
-        log "  dwc2 peripheral mode already enabled"
-    elif grep -q "dtoverlay=dwc2" "$CONFIG_FILE" 2>/dev/null; then
-        # Exists but wrong mode (e.g. host) — fix it
-        sed -i 's/dtoverlay=dwc2.*/dtoverlay=dwc2,dr_mode=peripheral/' "$CONFIG_FILE"
-        log "  dwc2 mode corrected to peripheral (was host)"
+    # Check if the [all] section has correct dwc2 line
+    # (Lines in [cm4]/[cm5] sections don't apply to Pi Zero 2 W)
+    if grep -A999 '^\[all\]' "$CONFIG_FILE" 2>/dev/null | grep -q "dtoverlay=dwc2,dr_mode=peripheral"; then
+        log "  dwc2 peripheral already in [all] section"
     else
-        echo "dtoverlay=dwc2,dr_mode=peripheral" >> "$CONFIG_FILE"
-        log "  dwc2 peripheral mode added to config.txt"
+        # Remove any dwc2 lines in [all] section, then add correct one
+        sed -i '/^\[all\]/,/^\[/{/dtoverlay=dwc2/d}' "$CONFIG_FILE" 2>/dev/null || true
+        sed -i '/^\[all\]/a dtoverlay=dwc2,dr_mode=peripheral' "$CONFIG_FILE"
+        log "  dwc2 peripheral mode added to [all] section"
+    fi
+    # Also fix any existing dwc2 in non-[all] sections (just in case)
+    if grep -q "dtoverlay=dwc2,dr_mode=host" "$CONFIG_FILE" 2>/dev/null; then
+        sed -i 's/dtoverlay=dwc2,dr_mode=host/dtoverlay=dwc2,dr_mode=peripheral/' "$CONFIG_FILE"
+        log "  Fixed dwc2 host→peripheral in other sections"
     fi
     # Hardware watchdog
     if ! grep -q "dtparam=watchdog=on" "$CONFIG_FILE" 2>/dev/null; then
