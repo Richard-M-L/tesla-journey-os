@@ -147,111 +147,122 @@ def check_for_updates(force: bool = False) -> dict:
     return result
 
 
-def apply_updates() -> dict:
-    """Pull updates from GitHub and apply them.
+_UPDATE_STATUS_FILE = Path("/tmp/tjos_update_status.json")
 
-    Steps:
-      1. Record current HEAD for rollback
-      2. git pull origin master
-      3. Check if requirements.txt changed → pip install
-      4. Restart backend service
-      5. If anything fails, rollback to previous HEAD
-    """
+
+def _update_worker() -> None:
+    """Background worker: git pull + pip install + restart service."""
+    import json
     prev_head = _get_head()
+    status = {"running": True, "success": False, "step": "正在准备...", "error": None}
 
-    result = {
-        "success": False,
-        "steps": [],
-        "error": None,
-        "restarted": False,
-    }
+    def _save(s):
+        status.update(s)
+        try: _UPDATE_STATUS_FILE.write_text(json.dumps(status))
+        except OSError: pass
 
     try:
-        # Step 1: Save current state
-        result["steps"].append("Saved current HEAD for rollback")
+        _save({"step": "正在从 GitHub 拉取更新..."})
 
-        # Check if there are local changes
-        status = subprocess.run(
+        # Stash local changes if any
+        st = subprocess.run(
             ["git", "-C", str(APP_DIR), "status", "--porcelain"],
             capture_output=True, text=True, timeout=10,
         )
-        if status.stdout.strip():
-            changes = [l.strip()[:80] for l in status.stdout.strip().split("\n")[:5]]
-            result["steps"].append(f"Stashing {len(changes)} local changes")
-            subprocess.run(
-                ["git", "-C", str(APP_DIR), "stash"],
-                capture_output=True, text=True, timeout=10,
-            )
+        if st.stdout.strip():
+            subprocess.run(["git", "-C", str(APP_DIR), "stash"], capture_output=True, timeout=10)
 
-        # Step 2: Check if requirements.txt changed BEFORE pulling
+        # Git pull
         old_req = _read_file(APP_DIR / "backend" / "requirements.txt")
-
-        # Step 3: git pull
-        result["steps"].append("Pulling from GitHub...")
         pull = subprocess.run(
             ["git", "-C", str(APP_DIR), "pull", "origin", "master"],
             capture_output=True, text=True, timeout=60,
         )
         if pull.returncode != 0:
-            raise Exception(f"Git pull failed: {pull.stderr.strip()[:200]}")
-        result["steps"].append(f"Pull OK: {pull.stdout.strip()[:100]}")
+            raise Exception(f"Git pull 失败: {pull.stderr.strip()[:200]}")
 
-        # Step 4: pip install if requirements changed
+        _save({"step": "正在检查依赖更新..."})
         new_req = _read_file(APP_DIR / "backend" / "requirements.txt")
         if old_req != new_req:
-            result["steps"].append("Requirements changed — installing...")
+            _save({"step": "正在安装新依赖..."})
             pip = subprocess.run(
                 [str(APP_DIR / "venv" / "bin" / "pip"), "install", "-r",
                  str(APP_DIR / "backend" / "requirements.txt"), "-q"],
                 capture_output=True, text=True, timeout=120,
             )
             if pip.returncode != 0:
-                raise Exception(f"Pip install failed: {pip.stderr.strip()[:200]}")
-            result["steps"].append("Dependencies updated")
-        else:
-            result["steps"].append("No dependency changes")
+                raise Exception(f"pip install 失败: {pip.stderr.strip()[:200]}")
 
-        # Step 5: Restart backend
-        result["steps"].append("Restarting backend...")
-        restart = subprocess.run(
-            ["sudo", "systemctl", "restart", "tjos-backend"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if restart.returncode != 0:
-            raise Exception(f"Service restart failed: {restart.stderr.strip()[:200]}")
-        result["steps"].append("Backend restarted")
-        result["restarted"] = True
+        _save({"step": "正在重启服务..."})
 
-        # Also restart nginx if it's running
-        subprocess.run(
-            ["sudo", "systemctl", "reload", "nginx"],
-            capture_output=True, text=True, timeout=10,
-        )
+        # IMPORTANT: schedule restart via nohup so this process can exit cleanly
+        import os as _os
+        _os.system("nohup bash -c 'sleep 1 && sudo systemctl restart tjos-backend' >/dev/null 2>&1 &")
+        _os.system("nohup bash -c 'sleep 2 && sudo systemctl reload nginx' >/dev/null 2>&1 &")
 
-        result["success"] = True
+        _save({"success": True, "running": False, "step": "更新完成，服务已重启"})
 
     except Exception as e:
-        result["error"] = str(e)
-        result["success"] = False
+        logger.exception("Update failed")
+        _save({"success": False, "running": False, "step": "更新失败", "error": str(e)})
 
         # Rollback
         if prev_head:
-            result["steps"].append(f"Rolling back to {prev_head[:7]}...")
-            rollback = subprocess.run(
+            _save({"step": f"正在回滚到 {prev_head[:7]}..."})
+            subprocess.run(
                 ["git", "-C", str(APP_DIR), "reset", "--hard", prev_head],
                 capture_output=True, text=True, timeout=10,
             )
-            if rollback.returncode == 0:
-                result["steps"].append("Rollback OK")
-                # Restart service with old code
-                subprocess.run(
-                    ["sudo", "systemctl", "restart", "tjos-backend"],
-                    capture_output=True, text=True, timeout=30,
-                )
-            else:
-                result["steps"].append(f"Rollback FAILED: {rollback.stderr.strip()[:100]}")
+            import os as _os
+            _os.system("nohup bash -c 'sleep 1 && sudo systemctl restart tjos-backend' >/dev/null 2>&1 &")
+            _save({"error": f"{str(e)} (已回滚)", "step": "已回滚到更新前版本"})
 
-    return result
+
+def apply_updates() -> dict:
+    """Start background update and return immediately.
+
+    The update runs in a daemon thread:
+      1. git pull origin master
+      2. pip install (if requirements changed)
+      3. systemctl restart tjos-backend
+      4. Rollback on failure
+
+    Frontend should poll /api/system/updates/status for progress.
+    """
+    import json, threading
+
+    # Check if update already running
+    if _UPDATE_STATUS_FILE.exists():
+        try:
+            existing = json.loads(_UPDATE_STATUS_FILE.read_text())
+            if existing.get("running"):
+                return {"started": False, "message": "更新已在运行中", "status": existing}
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Clear old status
+    try: _UPDATE_STATUS_FILE.unlink(missing_ok=True)
+    except OSError: pass
+
+    # Start worker thread
+    t = threading.Thread(target=_update_worker, daemon=True)
+    t.start()
+
+    return {
+        "started": True,
+        "message": "更新已开始，服务将在完成后自动重启",
+    }
+
+
+def get_update_status() -> dict:
+    """Get current update progress."""
+    import json
+    try:
+        if _UPDATE_STATUS_FILE.exists():
+            return json.loads(_UPDATE_STATUS_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"running": False, "success": False, "step": "无进行中的更新"}
 
 
 def _get_head() -> str:

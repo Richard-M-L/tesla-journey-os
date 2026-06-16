@@ -877,10 +877,13 @@ def check_updates(force: bool = False):
 
 @router.post("/system/updates/apply")
 async def apply_updates():
-    """Pull latest code and restart. Takes ~30s. Returns step-by-step progress."""
+    """Start background update. Returns immediately."""
     from app.modules.updater import apply_updates as _apply
-    # Run in thread — git pull + pip install + restart is blocking
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        future = pool.submit(_apply)
-        return future.result(timeout=120)
+    return _apply()
+
+
+@router.get("/system/updates/status")
+def get_update_status():
+    """Get current update progress."""
+    from app.modules.updater import get_update_status as _status
+    return _status()

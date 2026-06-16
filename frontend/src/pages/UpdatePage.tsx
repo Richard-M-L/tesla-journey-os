@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, Download, GitCommit, CheckCircle, AlertCircle, Clock, ArrowRight } from "lucide-react";
 
 interface CommitInfo { hash: string; message: string; date: string; }
@@ -17,11 +17,11 @@ interface UpdateCheck {
   error: string | null;
 }
 
-interface ApplyResult {
+interface UpdateStatus {
+  running: boolean;
   success: boolean;
-  steps: string[];
+  step: string;
   error: string | null;
-  restarted: boolean;
 }
 
 export function UpdatePage() {
@@ -30,52 +30,89 @@ export function UpdatePage() {
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [error, setError] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchVersion = useCallback(async () => {
     try {
       const r = await fetch("/api/system/version");
-      const d = await r.json();
-      setVersion(d.version);
-      setCommit(d.commit);
-    } catch (e) { console.error(e); }
+      setVersion((await r.json()).version);
+      const cr = await fetch("/api/system/version");
+      setCommit((await cr.json()).commit);
+    } catch { /* ignore */ }
   }, []);
 
   const handleCheck = useCallback(async (force = false) => {
     setChecking(true);
     setError("");
-    setApplyResult(null);
     try {
       const r = await fetch(`/api/system/updates/check?force=${force}`);
       const d = await r.json();
       setCheck(d);
       if (d.error) setError(d.error);
-    } catch (e) {
-      setError("Failed to check for updates");
+    } catch {
+      setError("检查更新失败，请检查网络连接");
     } finally {
       setChecking(false);
     }
   }, []);
 
   const handleApply = useCallback(async () => {
-    if (!confirm("Apply updates? The backend will restart after pulling the latest code.")) return;
+    if (!confirm("确定要更新吗？更新过程中服务会重启。")) return;
     setApplying(true);
     setError("");
+    setStatus(null);
+
     try {
       const r = await fetch("/api/system/updates/apply", { method: "POST" });
       const d = await r.json();
-      setApplyResult(d);
-      if (d.success) {
-        // Wait for service to restart, then refresh
-        setTimeout(() => {
-          fetchVersion();
-          handleCheck(true);
-        }, 5000);
+
+      if (!d.started) {
+        setError(d.message || "更新启动失败");
+        setApplying(false);
+        return;
       }
-    } catch (e) {
-      setError("Update failed — the service may be restarting. Refresh the page in a moment.");
-    } finally {
+
+      // Start polling for status
+      pollRef.current = setInterval(async () => {
+        try {
+          const sr = await fetch("/api/system/updates/status");
+          const sd: UpdateStatus = await sr.json();
+          setStatus(sd);
+
+          if (!sd.running) {
+            // Done (success or failure)
+            if (pollRef.current) clearInterval(pollRef.current);
+            setApplying(false);
+
+            if (sd.success) {
+              // Wait for service to come back, then refresh
+              let attempts = 0;
+              const healthCheck = setInterval(async () => {
+                try {
+                  const hr = await fetch("/health");
+                  if (hr.ok) {
+                    clearInterval(healthCheck);
+                    await fetchVersion();
+                    await handleCheck(true);
+                    setStatus({ running: false, success: true, step: "更新完成！页面即将刷新...", error: null });
+                    setTimeout(() => window.location.reload(), 2000);
+                  }
+                } catch { /* still restarting */ }
+                attempts++;
+                if (attempts > 30) {
+                  clearInterval(healthCheck);
+                  setStatus({ running: false, success: true, step: "更新完成，请手动刷新页面", error: null });
+                }
+              }, 2000);
+            }
+          }
+        } catch { /* polling error, ignore */ }
+      }, 1500);
+
+    } catch {
+      setError("请求失败，服务可能正在重启。请稍后刷新页面。");
       setApplying(false);
     }
   }, []);
@@ -83,6 +120,7 @@ export function UpdatePage() {
   useEffect(() => {
     fetchVersion();
     handleCheck();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   return (
@@ -140,14 +178,13 @@ export function UpdatePage() {
                 <span className="font-semibold">发现 {check.commit_count} 个新提交</span>
               </div>
 
-              {/* Changelog */}
               <div className="p-4 rounded-lg bg-tesla-gray-800 border border-tesla-gray-700 max-h-64 overflow-y-auto">
                 <h3 className="text-xs uppercase tracking-wider text-tesla-gray-500 mb-2">更新内容</h3>
                 <div className="space-y-2">
                   {check.new_commits.map((c) => (
                     <div key={c.hash} className="text-sm">
                       <div className="flex items-center gap-2">
-                        <ArrowRight className="w-3 h-3 text-tesla-blue" />
+                        <ArrowRight className="w-3 h-3 text-tesla-blue shrink-0" />
                         <span className="text-tesla-gray-200">{c.message}</span>
                       </div>
                       <div className="flex items-center gap-3 ml-5 mt-0.5 text-xs text-tesla-gray-500">
@@ -159,57 +196,43 @@ export function UpdatePage() {
                 </div>
               </div>
 
-              {/* Apply button */}
               <button onClick={handleApply} disabled={applying}
                 className="flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold bg-green-600 hover:bg-green-500 disabled:opacity-50 transition-colors w-full justify-center">
                 <Download className="w-4 h-4" />
-                {applying ? "更新中... 服务将重启" : "立即更新"}
+                {applying ? "更新中..." : "立即更新"}
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-tesla-gray-400">
               <CheckCircle className="w-5 h-5 text-green-500" />
-              <span>已是最新版本 (v{check.current_version})</span>
-              {check.checked_at && (
+              <span>已是最新版本</span>
+              {check.checked_at > 0 && (
                 <span className="text-xs text-tesla-gray-600 ml-1">
-                  (检查于 {new Date(check.checked_at * 1000).toLocaleTimeString("zh-CN")})
+                  （检查于 {new Date(check.checked_at * 1000).toLocaleTimeString("zh-CN")}）
                 </span>
               )}
             </div>
           )
         ) : (
-          <div className="text-sm text-tesla-gray-500">点击刷新检查获取最新信息</div>
+          <div className="text-sm text-tesla-gray-500">点击刷新检查获取最新版本信息</div>
         )}
       </div>
 
-      {/* Apply Result */}
-      {applyResult && (
-        <div className={`p-5 rounded-xl border ${
-          applyResult.success
-            ? "bg-green-500/10 border-green-500/20"
-            : "bg-red-500/10 border-red-500/20"
-        }`}>
-          <h2 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${
-            applyResult.success ? "text-green-400" : "text-red-400"
-          }`}>
-            {applyResult.success ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {applyResult.success ? "更新成功" : "更新失败"}
+      {/* Update Progress */}
+      {applying && status && (
+        <div className="p-5 rounded-xl bg-blue-500/10 border border-blue-500/20">
+          <h2 className="text-sm font-semibold text-blue-400 mb-3 flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            {status.running ? "正在更新..." : status.success ? "更新成功" : "更新完成"}
           </h2>
-          <div className="space-y-1">
-            {applyResult.steps.map((s, i) => (
-              <div key={i} className="text-sm text-tesla-gray-400 flex items-center gap-2">
-                <span className="text-tesla-gray-600">{i + 1}.</span> {s}
-              </div>
-            ))}
+          <div className="flex items-center gap-3">
+            {status.running && <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+            {!status.running && status.success && <CheckCircle className="w-4 h-4 text-green-400" />}
+            {!status.running && !status.success && <AlertCircle className="w-4 h-4 text-red-400" />}
+            <span className="text-sm text-tesla-gray-300">{status.step}</span>
           </div>
-          {applyResult.error && (
-            <div className="mt-3 text-sm text-red-400">{applyResult.error}</div>
-          )}
-          {applyResult.restarted && (
-            <div className="mt-3 text-sm text-amber-400 flex items-center gap-2">
-              <RefreshCw className="w-3 h-3 animate-spin" />
-              服务已重启 — 刷新页面以加载新版本
-            </div>
+          {status.error && (
+            <div className="mt-2 text-sm text-red-400">{status.error}</div>
           )}
         </div>
       )}
