@@ -63,21 +63,34 @@ echo ""
 # If running from curl (no local repo), clone first
 if [ ! -f "$APP_DIR/deploy/install.sh" ]; then
     log "Cloning Tesla Journey OS from GitHub..."
-    apt-get install -y -qq git 2>/dev/null || true
+    apt-get install -y -qq -o Acquire::Retries=5 git 2>/dev/null || true
     mkdir -p /opt
     if [ -d "$APP_DIR" ]; then
         warn "$APP_DIR already exists, updating..."
-        cd "$APP_DIR" && git pull origin master 2>/dev/null || true
+        cd "$APP_DIR" && (git pull origin master 2>/dev/null || true)
     else
-        git clone https://github.com/Richard-M-L/tesla-journey-os.git "$APP_DIR"
+        # Retry clone up to 3 times
+        for i in 1 2 3; do
+            git clone https://github.com/Richard-M-L/tesla-journey-os.git "$APP_DIR" 2>/dev/null && break
+            log "  git clone retry $i/3..."
+            sleep 5
+        done
+    fi
+    if [ ! -f "$APP_DIR/deploy/install.sh" ]; then
+        err "Git clone 失败，请检查网络: https://github.com/Richard-M-L/tesla-journey-os.git"
     fi
     log "Repo ready at $APP_DIR"
 fi
 
 # ── Step 1: System Dependencies ──
 log "[1/11] Installing system packages..."
-apt-get update -qq
-apt-get install -y -qq \
+# Retry apt operations — Pi Zero 2 W on WiFi can be flaky
+for i in 1 2 3; do
+    apt-get update -qq -o Acquire::Retries=5 && break
+    log "  apt update retry $i/3..."
+    sleep 5
+done
+apt-get install -y -qq -o Acquire::Retries=5 \
     python3 python3-venv python3-dev python3-pip \
     protobuf-compiler \
     ffmpeg \
@@ -86,7 +99,7 @@ apt-get install -y -qq \
     network-manager \
     hostapd dnsmasq \
     exfatprogs dosfstools \
-    || err "apt-get install failed"
+    || err "apt-get install 失败，请检查网络连接"
 
 # Node.js (for frontend build)
 if ! command -v node &>/dev/null; then
@@ -138,15 +151,30 @@ log "[4/11] Setting up Python environment..."
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 fi
-"$VENV_DIR/bin/pip" install --upgrade pip -q
 
-# Copy requirements if not already in place
-if [ -f "$APP_DIR/backend/requirements.txt" ]; then
-    "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
+# Pip base args: long timeout + retries for slow/unstable connections
+PIP_ARGS="--default-timeout=120 --retries 5"
+# Auto-detect Chinese network → use Tsinghua mirror
+if ping -c 1 -W 2 pypi.tuna.tsinghua.edu.cn &>/dev/null; then
+    PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
+    log "  使用清华 PyPI 镜像"
+elif ping -c 1 -W 2 mirrors.aliyun.com &>/dev/null; then
+    PIP_MIRROR="-i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com"
+    log "  使用阿里云 PyPI 镜像"
 else
-    # Install minimal set (project should be cloned first)
-    "$VENV_DIR/bin/pip" install fastapi uvicorn sqlalchemy apscheduler pyyaml pydantic python-multipart watchfiles protobuf httpx -q
+    PIP_MIRROR=""
 fi
+
+"$VENV_DIR/bin/pip" install --upgrade pip $PIP_ARGS $PIP_MIRROR
+
+if [ -f "$APP_DIR/backend/requirements.txt" ]; then
+    "$VENV_DIR/bin/pip" install -r "$APP_DIR/backend/requirements.txt" $PIP_ARGS $PIP_MIRROR
+else
+    "$VENV_DIR/bin/pip" install fastapi uvicorn sqlalchemy apscheduler pyyaml pydantic python-multipart watchfiles protobuf httpx $PIP_ARGS $PIP_MIRROR
+fi
+
+# Also install grpcio-tools for protobuf compilation
+"$VENV_DIR/bin/pip" install grpcio-tools $PIP_ARGS $PIP_MIRROR 2>/dev/null || true
 
 log "  Python venv ready."
 
