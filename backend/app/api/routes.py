@@ -887,3 +887,35 @@ def get_update_status():
     """Get current update progress."""
     from app.modules.updater import get_update_status as _status
     return _status()
+
+
+# ── Pipeline Queue ───────────────────────────────────
+
+@router.get("/system/queue/stats")
+def get_queue_stats(db: Session = Depends(get_db)):
+    from app.modules.pipeline_queue import get_queue_stats
+    return get_queue_stats(db)
+
+
+@router.get("/system/queue/dead-letters")
+def list_dead_letters(db: Session = Depends(get_db)):
+    from app.modules.pipeline_queue import get_dead_letters
+    return {"items": get_dead_letters(db)}
+
+
+@router.post("/system/queue/dead-letters/{item_id}/retry")
+def retry_dead_letter(item_id: int, db: Session = Depends(get_db)):
+    from app.modules.pipeline_queue import retry_dead_letter
+    ok = retry_dead_letter(db, item_id)
+    db.commit()
+    return {"success": ok}
+
+
+@router.delete("/system/queue/dead-letters/{item_id}")
+def delete_dead_letter(item_id: int, db: Session = Depends(get_db)):
+    from app.modules.pipeline_queue import delete_dead_letter
+    ok = delete_dead_letter(db, item_id)
+    db.commit()
+    return {"success": ok}
+
+

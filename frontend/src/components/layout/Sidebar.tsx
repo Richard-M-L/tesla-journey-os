@@ -38,6 +38,7 @@ const mediaItems = [
   { to: "/media/wraps", icon: Image, label: "车衣" },
   { to: "/media/plates", icon: FileText, label: "车牌" },
   { to: "/media/boombox", icon: Volume2, label: "Boombox" },
+  { to: "/media/export", icon: HardDrive, label: "导出到U盘" },
 ];
 
 export function Sidebar() {

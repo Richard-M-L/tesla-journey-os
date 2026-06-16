@@ -17,6 +17,7 @@ Protection layers (adapted from TeslaUSB):
 
 import logging
 import os
+import sys
 import time as time_mod
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.event_bus import Event, EventType, event_bus
-from app.models import IndexedFile, TelemetrySnapshot, TelemetryCold
+from app.models import IndexedFile, PipelineQueue, TelemetrySnapshot, TelemetryCold
 from app.modules.ingestion.parser import SeiParser, TelemetryFrame, extract_sei_messages
 
 logger = logging.getLogger("telemetry")
@@ -58,6 +59,18 @@ async def on_file_detected(event: Event) -> None:
     from app.database import SessionLocal
     path = event.data["path"]
 
+    # ── Layer 0: Pipeline queue enqueue ──
+    from app.modules.pipeline_queue import (enqueue, claim_next, complete, fail, recover_stale,
+        STAGE_DETECTED, STAGE_INDEXING)
+    db = SessionLocal()
+    try:
+        p_row = enqueue(db, path, stage=STAGE_DETECTED)
+        # Recover stale claims from previous runs
+        recover_stale(db, STAGE_DETECTED)
+        recover_stale(db, STAGE_INDEXING)
+    finally:
+        db.close()
+
     # ── Layer 1: Already indexed? ──
     db = SessionLocal()
     try:
@@ -66,6 +79,7 @@ async def on_file_detected(event: Event) -> None:
         ).first()
         if existing:
             logger.debug("Already indexed, skipping: %s", Path(path).name)
+            complete(db, p_row)
             return
     finally:
         db.close()
@@ -146,8 +160,31 @@ async def on_file_detected(event: Event) -> None:
             data={"file_path": path, "frame_count": len(snapshot_ids)},
         ))
 
+        # Pipeline: mark complete
+        db2 = SessionLocal()
+        try:
+            p = db2.query(PipelineQueue).filter(
+                PipelineQueue.source_path == path,
+                PipelineQueue.stage == STAGE_DETECTED,
+            ).first()
+            if p:
+                complete(db2, p)
+        finally:
+            db2.close()
+
     except Exception:
         logger.exception("Failed to index: %s", event.data.get("path"))
+        # Pipeline: mark failed
+        db2 = SessionLocal()
+        try:
+            p = db2.query(PipelineQueue).filter(
+                PipelineQueue.source_path == path,
+                PipelineQueue.stage == STAGE_DETECTED,
+            ).first()
+            if p:
+                fail(db2, p, str(sys.exc_info()[1]) if sys.exc_info()[1] else "Unknown error")
+        finally:
+            db2.close()
     finally:
         db.close()
 

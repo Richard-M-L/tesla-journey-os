@@ -17,11 +17,13 @@ import { StoragePage } from "@/pages/StoragePage";
 import { UsbSettingsPage } from "@/pages/UsbSettingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { UpdatePage } from "@/pages/UpdatePage";
+import { ExportPage } from "@/pages/ExportPage";
 
 export default function App() {
   return (
     <AppLayout>
       <Routes>
+        <Route path="/media/export" element={<ExportPage />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/timeline" element={<TimelinePage />} />
         <Route path="/trips/:id" element={<TripDetailPage />} />
