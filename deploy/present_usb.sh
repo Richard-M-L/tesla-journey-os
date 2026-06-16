@@ -27,6 +27,10 @@ BOOT_MODE=0
 
 echo "=== TJOS — Present USB Gadget ==="
 
+# Load required kernel modules (libcomposite creates the usb_gadget configfs dir)
+modprobe libcomposite 2>/dev/null || true
+modprobe dwc2 2>/dev/null || true
+
 # Ensure configfs is mounted
 if ! mountpoint -q /sys/kernel/config 2>/dev/null; then
     modprobe configfs 2>/dev/null || true
