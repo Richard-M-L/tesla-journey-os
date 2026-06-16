@@ -68,7 +68,10 @@
       "Bash(curl -s http://localhost:8002/api/stats)",
       "Bash(curl -s http://localhost:8002/api/trips)",
       "Bash(git push *)",
-      "Bash(rm -rf backend/app/modules/captive_portal backend/app/modules/task_coordinator backend/app/modules/watchdog)"
+      "Bash(rm -rf backend/app/modules/captive_portal backend/app/modules/task_coordinator backend/app/modules/watchdog)",
+      "Bash(chmod +x *)",
+      "Bash(bash -n deploy/build_image.sh)",
+      "Bash(bash -n deploy/install.sh)"
     ]
   }
 }

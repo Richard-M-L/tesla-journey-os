@@ -56,9 +56,23 @@ fi
 echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║    Tesla Journey OS — Pi Installer            ║"
-echo "║    Local-First Driving Behavior Platform      ║"
+echo "║    树莓派车载固件                              ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
+
+# If running from curl (no local repo), clone first
+if [ ! -f "$APP_DIR/deploy/install.sh" ]; then
+    log "Cloning Tesla Journey OS from GitHub..."
+    apt-get install -y -qq git 2>/dev/null || true
+    mkdir -p /opt
+    if [ -d "$APP_DIR" ]; then
+        warn "$APP_DIR already exists, updating..."
+        cd "$APP_DIR" && git pull origin master 2>/dev/null || true
+    else
+        git clone https://github.com/Richard-M-L/tesla-journey-os.git "$APP_DIR"
+    fi
+    log "Repo ready at $APP_DIR"
+fi
 
 # ── Step 1: System Dependencies ──
 log "[1/11] Installing system packages..."
