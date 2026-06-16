@@ -381,17 +381,8 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
-# Hardware watchdog: systemd feeds /dev/watchdog, expects app to notify
-# If app hangs > 30s without notifying, Pi reboots
-WatchdogSec=30
-
-# Security hardening
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/opt/tesla-journey-os/data /var/run /tmp
-ReadOnlyPaths=/opt/tesla-journey-os/backend /opt/tesla-journey-os/frontend /opt/tesla-journey-os/config.yaml
+# Hardware watchdog is handled by the app directly via /dev/watchdog
+# Do NOT use WatchdogSec here — uvicorn doesn't call sd_notify
 
 [Install]
 WantedBy=multi-user.target
