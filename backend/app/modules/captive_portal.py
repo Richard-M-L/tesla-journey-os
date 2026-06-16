@@ -89,49 +89,54 @@ def _portal_html(ssid: str = "Tesla Journey OS") -> str:
 
 
 # ── Detection endpoint routes ──
+# ALL endpoints return the branded HTML page. If we return "Success" or
+# HTTP 204, the OS thinks internet is available and does NOT show the
+# captive portal. We WANT the portal to show — so always return HTML.
+
+def _portal_page():
+    from app.modules.ap import get_portal_info
+    info = get_portal_info()
+    return HTMLResponse(_portal_html(info["ssid"]))
 
 @router.get("/hotspot-detect.html")
 async def apple_hotspot():
     """Apple iOS/macOS captive portal detection."""
-    return HTMLResponse("Success")
+    return _portal_page()
 
 @router.get("/library/test/success.html")
 async def apple_success():
-    return HTMLResponse("Success")
+    return _portal_page()
 
 @router.get("/generate_204")
 async def android_204():
-    """Android captive portal detection — expects HTTP 204."""
-    return Response(status_code=204)
+    """Android — return HTML so portal window opens."""
+    return _portal_page()
 
 @router.get("/gen_204")
 async def android_gen204():
-    return Response(status_code=204)
+    return _portal_page()
 
 @router.get("/connecttest.txt")
 async def windows_connecttest():
     """Windows NCSI detection."""
-    return PlainTextResponse("Microsoft Connect Test")
+    return _portal_page()
 
 @router.get("/ncsi.txt")
 async def windows_ncsi():
-    return PlainTextResponse("Microsoft NCSI")
+    return _portal_page()
 
 @router.get("/redirect")
 async def windows_redirect():
-    return RedirectResponse(url="/")
+    return _portal_page()
 
 @router.get("/success.txt")
 async def firefox_success():
     """Firefox captive portal detection."""
-    return PlainTextResponse("success")
+    return _portal_page()
 
 @router.get("/canonical.html")
-async def generic_canonical(request: Request):
-    """Generic captive portal landing page."""
-    from app.modules.ap import get_portal_info
-    info = get_portal_info()
-    return HTMLResponse(_portal_html(info["ssid"]))
+async def generic_canonical():
+    return _portal_page()
 
 @router.get("/favicon.ico")
 async def favicon():

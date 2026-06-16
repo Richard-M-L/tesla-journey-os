@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Wifi, Radio, Sliders, RefreshCw, Lock, Unlock, Signal, Plus, Trash2, AlertCircle, CheckCircle } from "lucide-react";
+import { Wifi, Radio, Sliders, RefreshCw, Lock, Unlock, Signal, Plus, Trash2, AlertCircle, CheckCircle, ChevronUp, ChevronDown, Eye, EyeOff } from "lucide-react";
 
 interface WifiNetwork {
   ssid: string; signal: number; security: string; secured: boolean;
 }
-interface SavedNet { name: string; ssid: string; priority: number; }
+interface SavedNet { name: string; ssid: string; priority: number; active: boolean; in_range: boolean; signal: number | null; }
 interface WifiState { connected: boolean; ssid: string | null; signal: number | null; }
 
 type Tab = "wifi" | "ap" | "advanced";
@@ -244,6 +244,26 @@ export function SettingsPage() {
             </div>
           </div>
 
+          {/* Add Network Form */}
+          <div className="p-4 rounded-xl bg-tesla-gray-800/50 border border-tesla-gray-800">
+            <h3 className="text-sm font-semibold text-tesla-gray-300 mb-3">添加网络</h3>
+            <div className="flex gap-2 flex-wrap">
+              <input list="scan-list" placeholder="SSID" value={connectSSID}
+                onChange={e => setConnectSSID(e.target.value)}
+                className="flex-1 min-w-[120px] px-3 py-2 rounded bg-tesla-gray-800 border border-tesla-gray-700 text-sm text-white" />
+              <datalist id="scan-list">{networks.map(n => <option key={n.ssid} value={n.ssid} />)}</datalist>
+              <input type="password" placeholder="密码" value={connectPass}
+                onChange={e => setConnectPass(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleConnectWithPass()}
+                className="flex-1 min-w-[120px] px-3 py-2 rounded bg-tesla-gray-800 border border-tesla-gray-700 text-sm text-white" />
+              <button onClick={handleConnectWithPass} disabled={!connectSSID || connecting !== null}
+                className="px-4 py-2 rounded-lg bg-tesla-blue text-sm font-medium hover:bg-tesla-blue/80 disabled:opacity-50">
+                {connecting ? "连接中..." : "连接"}
+              </button>
+            </div>
+            {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+          </div>
+
           {/* Saved Networks */}
           {saved.length > 0 && (
             <div className="rounded-xl bg-tesla-gray-800/50 border border-tesla-gray-800 overflow-hidden">
@@ -251,11 +271,40 @@ export function SettingsPage() {
                 <h2 className="text-sm font-semibold text-tesla-gray-300">已保存的网络</h2>
               </div>
               <div className="divide-y divide-tesla-gray-800/50">
-                {saved.map((n) => (
-                  <div key={n.name} className="flex items-center justify-between px-5 py-3">
-                    <span className="text-sm">{n.ssid || n.name}</span>
+                {saved.map((n, i) => (
+                  <div key={n.name} className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {/* Reorder buttons */}
+                      <div className="flex flex-col gap-0.5 mr-1">
+                        <button onClick={async () => {
+                          const reorder = [...saved];
+                          if (i > 0) { [reorder[i-1], reorder[i]] = [reorder[i], reorder[i-1]]; }
+                          await fetch("/api/wifi/reorder", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({names:reorder.map(x=>x.name)})});
+                          fetchSaved();
+                        }} disabled={i===0} className="text-tesla-gray-600 hover:text-white disabled:opacity-30"><ChevronUp className="w-3 h-3"/></button>
+                        <button onClick={async () => {
+                          const reorder = [...saved];
+                          if (i < saved.length-1) { [reorder[i], reorder[i+1]] = [reorder[i+1], reorder[i]]; }
+                          await fetch("/api/wifi/reorder", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({names:reorder.map(x=>x.name)})});
+                          fetchSaved();
+                        }} disabled={i===saved.length-1} className="text-tesla-gray-600 hover:text-white disabled:opacity-30"><ChevronDown className="w-3 h-3"/></button>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {n.active && <span className="w-2 h-2 rounded-full bg-green-500" />}
+                          <span className="text-sm font-medium truncate">{n.ssid || n.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-tesla-gray-500 mt-0.5">
+                          {n.in_range ? (
+                            <span className="flex items-center gap-1 text-green-400">
+                              <Signal className="w-3 h-3" /> {n.signal}%
+                            </span>
+                          ) : n.active ? null : <span className="text-tesla-gray-600">不在范围内</span>}
+                        </div>
+                      </div>
+                    </div>
                     <button onClick={() => handleForget(n.name)}
-                      className="text-tesla-gray-600 hover:text-red-400 transition-colors">
+                      className="text-tesla-gray-600 hover:text-red-400 transition-colors p-1 ml-2">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>

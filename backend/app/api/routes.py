@@ -395,6 +395,21 @@ def forget_wifi(name: str):
     return forget_network(name)
 
 
+@router.post("/wifi/reorder")
+async def reorder_wifi(request: Request):
+    """Reorder saved WiFi network priorities. Body: {"names": ["net1","net2",...]}"""
+    from app.modules.wifi import _nmcli
+    try:
+        body = await request.json()
+        names = body.get("names", [])
+    except Exception:
+        return {"success": False, "error": "无效的 JSON"}
+    for i, name in enumerate(names):
+        pri = 100 - (i * 10)
+        _nmcli(["connection", "modify", name, "connection.autoconnect-priority", str(pri)])
+    return {"success": True, "reordered": len(names)}
+
+
 # ── AP / Hotspot ─────────────────────────────────────
 
 @router.get("/ap/status")

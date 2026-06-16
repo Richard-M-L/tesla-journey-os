@@ -72,20 +72,35 @@ def get_force_mode() -> str:
 
 
 def set_force_mode(mode: str) -> dict:
-    """Set AP force mode. Valid: auto, force_on, force_off."""
+    """Set AP force mode. Valid: auto, force_on, force_off. Persists to config.yaml."""
     if mode not in ("auto", "force_on", "force_off"):
-        return {"success": False, "error": "Invalid mode. Use: auto, force_on, force_off"}
+        return {"success": False, "error": "无效模式。可用: auto, force_on, force_off"}
 
     _ensure_runtime_dir()
     try:
-        # Write to runtime file (does not persist across reboots)
+        # Write to runtime file for immediate effect
         tmp = str(RUNTIME_FORCE_FILE) + ".tmp"
         Path(tmp).write_text(mode)
         os.replace(tmp, str(RUNTIME_FORCE_FILE))
-        logger.info("AP force mode set to: %s", mode)
-        return {"success": True, "mode": mode}
-    except OSError as e:
-        return {"success": False, "error": str(e)}
+    except OSError:
+        pass
+
+    # Persist to config.yaml for reboot survival
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        raw.setdefault("offline_ap", {})["force_mode"] = mode
+        tmp_path = str(CONFIG_PATH) + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
+    except Exception as e:
+        logger.warning("Could not persist force mode to config: %s", e)
+
+    logger.info("AP force mode set to: %s (persisted)", mode)
+    return {"success": True, "mode": mode}
 
 
 # ── Config ──

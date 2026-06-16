@@ -78,8 +78,12 @@ def scan_networks(rescan: bool = True) -> list[dict]:
 # ── Saved networks ──
 
 def get_saved_networks() -> list[dict]:
-    """List all saved WiFi connections."""
+    """List all saved WiFi connections enriched with signal, active, in_range."""
     result = _nmcli(["-t", "-f", "NAME,TYPE,AUTOCONNECT-PRIORITY", "connection"])
+
+    # Get active connection name + scan results for enrichment
+    active_name = _get_active_wlan0_connection()
+    scan_results = {n["ssid"]: n for n in scan_networks(rescan=False)} if active_name else {}
 
     saved = []
     for line in result.stdout.strip().split("\n"):
@@ -96,10 +100,18 @@ def get_saved_networks() -> list[dict]:
         if ssid_result.stdout:
             ssid = ssid_result.stdout.strip()
 
+        # Enrich
+        active = name == active_name
+        in_range = ssid in scan_results
+        signal = scan_results[ssid]["signal"] if in_range else None
+
         saved.append({
             "name": name,
             "ssid": ssid,
             "priority": int(priority) if priority.strip().lstrip("-").isdigit() else 0,
+            "active": active,
+            "in_range": in_range,
+            "signal": signal,
         })
 
     return sorted(saved, key=lambda n: n["priority"], reverse=True)
@@ -108,33 +120,68 @@ def get_saved_networks() -> list[dict]:
 # ── Connect ──
 
 def connect_to_ssid(ssid: str, password: str) -> dict:
-    """Connect to a WiFi network. Returns success/error."""
+    """Connect to a WiFi network with failsafe: revert + AP fallback.
+
+    1. Save current connection for revert
+    2. Try to connect to the new network
+    3. If fails, revert to previous connection
+    4. If revert fails too, start fallback AP
+    """
     with _CONNECT_LOCK:
         # Validate inputs
         if not ssid or len(ssid) > 32:
-            return {"success": False, "error": "SSID must be 1-32 characters"}
-        if password and len(password) < 8:
-            return {"success": False, "error": "Password must be at least 8 characters"}
+            return {"success": False, "error": "SSID 须 1-32 个字符"}
+        if password and (len(password) < 8 or len(password) > 63):
+            return {"success": False, "error": "密码须 8-63 个字符"}
 
-        # Remove existing connection with same SSID if exists
+        # Save current active connection for rollback
+        prev_connection = _get_active_wlan0_connection()
+        logger.info("Current connection: %s, connecting to: %s", prev_connection, ssid)
+
+        # Remove existing connection with same SSID
         existing = _find_connection_by_ssid(ssid)
         if existing:
             _nmcli(["connection", "delete", existing])
 
-        # Create new connection
-        result = _nmcli([
-            "device", "wifi", "connect", ssid,
-            "password", password,
-        ])
+        # Try to connect (with retries)
+        connected = False
+        for attempt in range(1, 4):
+            result = _nmcli([
+                "device", "wifi", "connect", ssid,
+                "password", password,
+            ], timeout=30)
+            if result.returncode == 0:
+                connected = True
+                break
+            logger.warning("Connect attempt %d/3 failed, retrying...", attempt)
+            time_mod.sleep(3)
 
-        if result.returncode == 0:
-            _promote_connection(ssid)
-            _write_status({"success": True, "ssid": ssid})
-            return {"success": True, "ssid": ssid}
-        else:
-            err = result.stderr.strip() or "Connection failed"
-            _write_status({"success": False, "error": err})
-            return {"success": False, "error": err}
+        if connected:
+            # Verify IPv4
+            if _wlan0_has_ipv4():
+                _promote_connection(ssid)
+                _write_status({"success": True, "ssid": ssid})
+                return {"success": True, "ssid": ssid, "verified": True}
+            else:
+                logger.warning("Connected but no IPv4 — waiting...")
+                time_mod.sleep(5)
+                if _wlan0_has_ipv4():
+                    _promote_connection(ssid)
+                    return {"success": True, "ssid": ssid, "verified": True}
+
+        # ── FAILSAFE: revert to previous connection ──
+        logger.error("Connection to %s failed, reverting to %s", ssid, prev_connection)
+        if prev_connection:
+            revert = _nmcli(["connection", "up", prev_connection], timeout=20)
+            if revert.returncode == 0 and _wlan0_has_ipv4():
+                _write_status({"success": False, "error": f"连接 {ssid} 失败，已恢复到 {prev_connection}", "reverted": True})
+                return {"success": False, "error": f"连接失败，已恢复到 {prev_connection}", "reverted": True}
+
+        # ── LAST RESORT: start AP fallback ──
+        logger.warning("Revert failed, starting fallback AP")
+        _start_fallback_ap()
+        _write_status({"success": False, "error": f"连接 {ssid} 失败，已启动热点", "ap_started": True})
+        return {"success": False, "error": "连接失败，已启动离线热点", "ap_started": True}
 
 
 def forget_network(connection_name: str) -> dict:
@@ -158,13 +205,55 @@ def _find_connection_by_ssid(ssid: str) -> str | None:
             return net["name"]
     return None
 
-
 def _promote_connection(ssid: str) -> None:
-    """Give the newly connected network highest priority."""
+    """Give the newly connected network highest priority, decrement others."""
     name = _find_connection_by_ssid(ssid)
     if not name:
         return
     _nmcli(["connection", "modify", name, "connection.autoconnect-priority", "100"])
+    # Decrement other wireless connections
+    for net in get_saved_networks():
+        if net["name"] != name:
+            new_pri = max(0, net["priority"] - 10)
+            _nmcli(["connection", "modify", net["name"], "connection.autoconnect-priority", str(new_pri)])
+
+def _get_active_wlan0_connection() -> str | None:
+    """Get the name of the currently active connection on wlan0."""
+    result = _nmcli(["-t", "-f", "NAME,DEVICE", "connection", "show", "--active"])
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[1].strip() == "wlan0":
+            return parts[0].strip()
+    return None
+
+def _wlan0_has_ipv4() -> bool:
+    """Check if wlan0 has a valid IPv4 address."""
+    import subprocess as sp
+    try:
+        r = sp.run(["ip", "-4", "-br", "addr", "show", "wlan0"],
+                   capture_output=True, text=True, timeout=5)
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return False
+
+def _start_fallback_ap() -> None:
+    """Start the offline access point as a connectivity fallback."""
+    try:
+        from app.modules.ap import set_force_mode
+        set_force_mode("force_on")
+        logger.info("Fallback AP started")
+    except Exception:
+        logger.exception("Failed to start fallback AP")
+
+def _get_connection_signal(connection_name: str) -> int | None:
+    """Get RSSI signal strength for an active connection."""
+    result = _nmcli(["-t", "-f", "IN-USE,SIGNAL", "dev", "wifi"])
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[0] == "*":
+            try: return int(parts[1])
+            except ValueError: pass
+    return None
 
 
 def _write_status(data: dict) -> None:

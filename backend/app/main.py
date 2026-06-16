@@ -100,6 +100,19 @@ from app.modules.captive_portal import router as portal_router
 app.include_router(portal_router)
 
 
+# Catch-all redirect: any unknown URL → dashboard (captive portal behavior)
+@app.get("/{path:path}")
+async def catch_all(path: str):
+    """Catch-all route for captive portal. Redirects unknown URLs to the dashboard.
+    Skips known API/static paths to avoid interfering with real routes."""
+    skip_prefixes = ("api/", "health", "static/", "media/export", "settings", "videos")
+    if any(path.startswith(p) for p in skip_prefixes):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/")
+
+
 @app.get("/health")
 async def health():
     from app.modules.storage import get_storage_health
