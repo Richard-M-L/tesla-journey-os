@@ -67,7 +67,8 @@
       "Bash(PYTHONPATH=\"C:/Users/Richard/OneDrive/Desktop/Tesla Journey OS/backend\" \"C:/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe\" -m uvicorn app.main:app --host 0.0.0.0 --port 8002)",
       "Bash(curl -s http://localhost:8002/api/stats)",
       "Bash(curl -s http://localhost:8002/api/trips)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(rm -rf backend/app/modules/captive_portal backend/app/modules/task_coordinator backend/app/modules/watchdog)"
     ]
   }
 }
