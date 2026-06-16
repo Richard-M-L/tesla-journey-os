@@ -1,11 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
-import { Volume2, Upload, Trash2, CheckCircle, AlertCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Volume2, Upload, Trash2, CheckCircle, AlertCircle, ShieldAlert } from "lucide-react";
 
-interface BoomboxSound { filename: string; size_bytes: number; format: string; valid: boolean; }
+interface BoomboxSound {
+  filename: string; size_kb: number; format: string; valid: boolean; compliant: boolean;
+}
+
+const NHTSA_NOTICE = "外放音效仅在驻车时播放（2022年2月 NHTSA 召回 22V-068）。车辆必须配备外部行人警告扬声器——Model 3/Y/S/X 需 2019年9月后生产，Cybertruck 支持全部年份。";
 
 export function BoomboxPage() {
   const [sounds, setSounds] = useState<BoomboxSound[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const fetchSounds = useCallback(async () => {
     try { const r = await fetch("/api/media/boombox"); const d = await r.json(); setSounds(d.sounds || []); }
@@ -14,18 +21,19 @@ export function BoomboxPage() {
 
   useEffect(() => { fetchSounds(); }, [fetchSounds]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
+  const handleUpload = async (file: File) => {
+    setUploading(true);
     try {
       const form = new FormData(); form.append("file", file);
       const r = await fetch("/api/media/boombox/upload", { method: "POST", body: form });
       const d = await r.json();
-      if (d.success) fetchSounds(); else alert(d.error || "Upload failed");
-    } catch (e) { alert("Upload error"); }
+      if (d.success) { await fetchSounds(); } else alert(d.error || "上传失败");
+    } catch { alert("上传失败"); }
+    finally { setUploading(false); }
   };
 
   const handleDelete = async (f: string) => {
-    if (!confirm(`Delete ${f}?`)) return;
+    if (!confirm(`删除 ${f}？`)) return;
     await fetch(`/api/media/boombox/${encodeURIComponent(f)}`, { method: "DELETE" });
     fetchSounds();
   };
@@ -35,14 +43,21 @@ export function BoomboxPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Boombox 音效</h1>
-          <p className="text-xs text-tesla-gray-500 mt-1">
-            MP3/WAV · 最多5个{ sounds.length >= 5 ? <span className="text-amber-400 ml-1">(已满)</span> : null}
-          </p>
+          <p className="text-xs text-tesla-gray-500 mt-1">MP3/WAV · ≤1MB · 最多 5 个 · 文件名 ≤64 字符</p>
         </div>
-        <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${sounds.length >= 5 ? "bg-tesla-gray-700 cursor-not-allowed" : "bg-tesla-blue hover:bg-tesla-blue/80"}`}>
-          <Upload className="w-4 h-4" /> 上传
-          <input type="file" accept=".mp3,.wav" onChange={handleUpload} className="hidden" disabled={sounds.length >= 5} />
+        <label className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${sounds.length>=5 ? "bg-tesla-gray-700 cursor-not-allowed" : "bg-tesla-blue hover:bg-tesla-blue/80"}`}>
+          <Upload className="w-4 h-4" /> {sounds.length>=5 ? "已满" : uploading ? "上传中..." : "上传"}
+          <input ref={inputRef} type="file" accept=".mp3,.wav" onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} className="hidden" disabled={sounds.length>=5} />
         </label>
+      </div>
+
+      {/* NHTSA Safety Notice */}
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+        <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm text-amber-400 font-semibold mb-1">安全声明</p>
+          <p className="text-xs text-amber-300/70">{NHTSA_NOTICE}</p>
+        </div>
       </div>
 
       {loading ? <div className="animate-pulse text-tesla-gray-400">加载中...</div> :
@@ -54,21 +69,18 @@ export function BoomboxPage() {
       ) : (
         <div className="space-y-2">
           {sounds.map((s, i) => (
-            <div key={s.filename} className="flex items-center justify-between px-4 py-3 rounded-xl bg-tesla-gray-800/50 border border-tesla-gray-800">
+            <div key={s.filename} className={`px-4 py-3 rounded-xl border flex items-center justify-between ${s.compliant ? "bg-tesla-gray-800/50 border-tesla-gray-800" : "bg-red-500/5 border-red-500/20"}`}>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-tesla-gray-500 w-5">{i + 1}</span>
-                {s.valid ? <CheckCircle className="w-4 h-4 text-green-400" /> : <AlertCircle className="w-4 h-4 text-amber-500" />}
+                {s.compliant ? <CheckCircle className="w-4 h-4 text-green-400" /> :
+                 <AlertCircle className="w-4 h-4 text-red-400" />}
                 <div>
                   <span className="text-sm font-medium">{s.filename}</span>
-                  <span className="text-xs text-tesla-gray-500 ml-2 uppercase">{s.format}</span>
+                  <span className="text-xs text-tesla-gray-500 ml-2">{s.size_kb.toFixed(0)}KB · {s.format}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-tesla-gray-500">{(s.size_bytes / 1024).toFixed(0)} KB</span>
-                <button onClick={() => handleDelete(s.filename)} className="text-tesla-gray-600 hover:text-red-400 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              <button onClick={() => handleDelete(s.filename)}
+                className="text-tesla-gray-600 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
             </div>
           ))}
         </div>
