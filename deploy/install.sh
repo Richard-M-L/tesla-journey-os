@@ -114,12 +114,16 @@ log "  System packages installed."
 log "[2/11] Enabling USB Gadget kernel support (dwc2)..."
 CONFIG_FILE="/boot/firmware/config.txt"
 if [ -f "$CONFIG_FILE" ]; then
-    # dwc2 for USB gadget
-    if ! grep -q "dtoverlay=dwc2" "$CONFIG_FILE" 2>/dev/null; then
-        echo "dtoverlay=dwc2" >> "$CONFIG_FILE"
-        log "  dwc2 overlay added to config.txt"
+    # dwc2 MUST be in peripheral mode for USB gadget
+    if grep -q "dtoverlay=dwc2,dr_mode=peripheral" "$CONFIG_FILE" 2>/dev/null; then
+        log "  dwc2 peripheral mode already enabled"
+    elif grep -q "dtoverlay=dwc2" "$CONFIG_FILE" 2>/dev/null; then
+        # Exists but wrong mode (e.g. host) — fix it
+        sed -i 's/dtoverlay=dwc2.*/dtoverlay=dwc2,dr_mode=peripheral/' "$CONFIG_FILE"
+        log "  dwc2 mode corrected to peripheral (was host)"
     else
-        log "  dwc2 overlay already enabled"
+        echo "dtoverlay=dwc2,dr_mode=peripheral" >> "$CONFIG_FILE"
+        log "  dwc2 peripheral mode added to config.txt"
     fi
     # Hardware watchdog
     if ! grep -q "dtparam=watchdog=on" "$CONFIG_FILE" 2>/dev/null; then
