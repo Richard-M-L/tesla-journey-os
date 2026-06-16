@@ -46,8 +46,8 @@ export function LightShowsPage() {
     const show = shows.find(s => s.name === name);
     const audioFile = show?.files.find(f => f.ext === ".mp3" || f.ext === ".wav");
     if (!audioFile) return;
-    // Stream via API
-    const url = `/api/videos/stream?path=${encodeURIComponent(`/opt/tesla-journey-os/data/media/LightShow/${audioFile.filename}`)}`;
+    // Stream via dedicated media endpoint
+    const url = `/api/media/lightshows/preview?name=${encodeURIComponent(name)}&file=${encodeURIComponent(audioFile.filename)}`;
     if (audioRef.current) { audioRef.current.src = url; audioRef.current.play(); }
     setPlaying(name);
   };

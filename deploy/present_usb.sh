@@ -10,7 +10,9 @@
 # ===========================================================================
 set -euo pipefail
 
-APP_DIR="/opt/tesla-journey-os"
+# Auto-detect project root from script location
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="${APP_DIR}/data/images"
 GADGET_NAME="tesla_journey"
 GADGET_PATH="/sys/kernel/config/usb_gadget/${GADGET_NAME}"

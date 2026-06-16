@@ -29,11 +29,12 @@ UDC_PATH = Path("/sys/class/udc")
 # State file
 STATE_FILE = Path("/var/run/tjos_usb_mode")
 
-# Default image locations (match config.yaml)
+# Default image locations — auto-detect from project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 DEFAULT_IMAGES = {
-    "cam": "/opt/tesla-journey-os/data/images/usb_cam.img",
-    "lightshow": "/opt/tesla-journey-os/data/images/usb_lightshow.img",
-    "music": "/opt/tesla-journey-os/data/images/usb_music.img",
+    "cam": str(_PROJECT_ROOT / "data/images/usb_cam.img"),
+    "lightshow": str(_PROJECT_ROOT / "data/images/usb_lightshow.img"),
+    "music": str(_PROJECT_ROOT / "data/images/usb_music.img"),
 }
 
 # RO mount locations (where Pi reads files while gadget is active)

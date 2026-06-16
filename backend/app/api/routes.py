@@ -310,6 +310,19 @@ def delete_light_show(name: str):
     return {"success": count > 0, "deleted": count}
 
 
+@router.get("/media/lightshows/preview")
+async def preview_lightshow_audio(name: str, file: str):
+    """Stream a light show audio file for browser preview."""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from app.modules.media import LIGHT_SHOW_DIR
+    fpath = LIGHT_SHOW_DIR / file
+    if not fpath.exists():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "文件不存在"}, status_code=404)
+    return FileResponse(str(fpath), media_type="audio/mpeg" if fpath.suffix==".mp3" else "audio/wav")
+
+
 # ── Media: Music ────────────────────────────────────
 
 @router.get("/media/music")

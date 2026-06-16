@@ -16,7 +16,8 @@ from pathlib import Path
 
 logger = logging.getLogger("updater")
 
-APP_DIR = Path("/opt/tesla-journey-os")
+# Auto-detect project root from this file's location
+APP_DIR = Path(__file__).resolve().parent.parent.parent.parent
 VERSION_FILE = APP_DIR / "VERSION"
 REPO_URL = "https://github.com/Richard-M-L/tesla-journey-os"
 GITHUB_API = "https://api.github.com/repos/Richard-M-L/tesla-journey-os"
