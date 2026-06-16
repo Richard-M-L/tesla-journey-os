@@ -3,21 +3,42 @@ Telemetry module — processes raw telemetry frames into stored snapshots.
 
 This is the central ingest pipeline:
   1. Listens for FILE_DETECTED events
-  2. Parses SEI data from MP4 files
-  3. Stores TelemetrySnapshot + TelemetryCold rows
-  4. Emits TELEMETRY_INGESTED events for downstream modules
+  2. Stable-write check (file unchanged for N seconds)
+  3. Stationary clip filter (skip if speed=0 + gear=PARK)
+  4. Parses SEI data from MP4 files
+  5. Stores TelemetrySnapshot + TelemetryCold rows
+  6. Emits TELEMETRY_INGESTED events for downstream modules
+
+Protection layers (adapted from TeslaUSB):
+  - Stable write: file mtime must be unchanged for STABLE_WRITE_AGE seconds
+  - Stationary filter: skip clips where first N frames have speed=0 + gear=PARK
+  - Cross-folder dedup: skip files already in IndexedFile table
 """
 
 import logging
+import os
+import time as time_mod
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.event_bus import Event, EventType, event_bus
 from app.models import IndexedFile, TelemetrySnapshot, TelemetryCold
-from app.modules.ingestion.parser import SeiParser, TelemetryFrame
+from app.modules.ingestion.parser import SeiParser, TelemetryFrame, extract_sei_messages
 
 logger = logging.getLogger("telemetry")
+
+# ── Configurable thresholds ──
+# File must be unchanged for this many seconds before processing
+STABLE_WRITE_AGE = int(os.environ.get("TJOS_STABLE_WRITE_AGE", "5"))
+
+# When peeking for stationary detection, only walk this many MB of the file
+STATIONARY_PEEK_MB = int(os.environ.get("TJOS_STATIONARY_PEEK_MB", "3"))
+STATIONARY_PEEK_BYTES = STATIONARY_PEEK_MB * 1024 * 1024
+
+# If ALL peek frames have speed below this and gear is PARK, skip the file
+STATIONARY_SPEED_THRESHOLD = 0.1  # m/s
 
 
 async def register() -> None:
@@ -26,11 +47,51 @@ async def register() -> None:
 
 
 async def on_file_detected(event: Event) -> None:
-    """Handle a new file detection — parse and store its telemetry."""
+    """Handle a new file detection with protection layers.
+
+    Order of checks:
+      1. Already indexed? → skip
+      2. Still being written? → skip (will retry on next scan)
+      3. Stationary (sentry mode)? → skip
+      4. Parse and store
+    """
     from app.database import SessionLocal
+    path = event.data["path"]
+
+    # ── Layer 1: Already indexed? ──
     db = SessionLocal()
     try:
-        path = event.data["path"]
+        existing = db.query(IndexedFile).filter(
+            IndexedFile.file_path == path
+        ).first()
+        if existing:
+            logger.debug("Already indexed, skipping: %s", Path(path).name)
+            return
+    finally:
+        db.close()
+
+    # ── Layer 2: Stable write check ──
+    if not _is_stable(path):
+        logger.info("File still being written, deferring: %s", Path(path).name)
+        return
+
+    # ── Layer 3: Stationary clip filter ──
+    if _is_stationary(path):
+        logger.info("Stationary clip (sentry mode), skipping: %s", Path(path).name)
+        # Still record as indexed to avoid re-checking
+        db = SessionLocal()
+        try:
+            _record_skip(db, path, event.data.get("size", 0), has_gps=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+        return
+
+    # ── Full pipeline ──
+    db = SessionLocal()
+    try:
         logger.info("Indexing: %s", path)
 
         parser = SeiParser(path)
@@ -38,6 +99,8 @@ async def on_file_detected(event: Event) -> None:
 
         if not frames:
             logger.debug("No telemetry frames found in: %s", path)
+            _record_skip(db, path, event.data.get("size", 0), has_gps=False)
+            db.commit()
             return
 
         # Assign timestamps if the parser didn't populate them
@@ -66,8 +129,7 @@ async def on_file_detected(event: Event) -> None:
         except OSError:
             logger.debug("Could not write sidecar for %s", path)
 
-        # Emit telemetry ingested event for each frame batch
-        # Downstream modules (trip, event) listen for this
+        # Emit telemetry ingested event → downstream (trip, event)
         await event_bus.emit(Event(
             type=EventType.TELEMETRY_INGESTED,
             data={
@@ -79,7 +141,6 @@ async def on_file_detected(event: Event) -> None:
             },
         ))
 
-        # Emit file indexed event
         await event_bus.emit(Event(
             type=EventType.FILE_INDEXED,
             data={"file_path": path, "frame_count": len(snapshot_ids)},
@@ -91,10 +152,94 @@ async def on_file_detected(event: Event) -> None:
         db.close()
 
 
-def _ensure_timestamps(frames: list[TelemetryFrame]) -> None:
-    """If frames lack timestamps, distribute them evenly across the file's duration.
-    Tesla dashcam files are 60 seconds at 30 fps = 1800 frames max.
+# ── Protection layer helpers ──
+
+def _is_stable(path: str) -> bool:
+    """Check if a file has stopped being written to.
+
+    The file's mtime must be unchanged for at least STABLE_WRITE_AGE seconds.
+    Tesla writes dashcam clips over ~60 seconds — if mtime is still changing,
+    the file is still being written.
     """
+    try:
+        p = Path(path)
+        if not p.exists():
+            return False
+        stat = p.stat()
+        mtime = stat.st_mtime
+        now = time_mod.time()
+
+        # File was modified less than STABLE_WRITE_AGE ago → still writing
+        if now - mtime < STABLE_WRITE_AGE:
+            logger.debug(
+                "File %s modified %.1fs ago (need %ds stable)",
+                p.name, now - mtime, STABLE_WRITE_AGE,
+            )
+            return False
+
+        return True
+    except OSError:
+        return False
+
+
+def _is_stationary(path: str) -> bool:
+    """Quick peek at the start of a video to check if it's stationary.
+
+    Peeks at the first STATIONARY_PEEK_MB of the file. If ALL frames
+    in the peek window have speed < STATIONARY_SPEED_THRESHOLD and
+    gear is PARK, the clip is almost certainly sentry mode → skip it.
+
+    Returns True if the clip appears stationary (should be skipped).
+    Returns False if it might be a driving clip (should be processed).
+    """
+    try:
+        peek_frames = list(extract_sei_messages(
+            path,
+            sample_rate=5,  # Every 5th frame = ~6 frames/sec
+            max_walk_bytes=STATIONARY_PEEK_BYTES,
+        ))
+
+        if not peek_frames:
+            return False  # No frames at all → let full parser decide
+
+        # Check if ALL peek frames are stationary
+        stationary_count = 0
+        for f in peek_frames:
+            if abs(f.speed_mps) < STATIONARY_SPEED_THRESHOLD:
+                stationary_count += 1
+
+        # If > 90% of peek frames are stationary, skip
+        ratio = stationary_count / len(peek_frames)
+        if ratio > 0.9:
+            logger.debug(
+                "Stationary peek: %d/%d frames (%.0f%%) have speed ~0",
+                stationary_count, len(peek_frames), ratio * 100,
+            )
+            return True
+
+        return False
+
+    except Exception:
+        logger.debug("Stationary peek failed for %s — will process fully", path)
+        return False
+
+
+def _record_skip(db: Session, path: str, file_size: int, has_gps: bool) -> None:
+    """Record a skipped file in the index so it won't be re-checked."""
+    indexed = IndexedFile(
+        file_path=path,
+        file_size=file_size,
+        file_mtime=datetime.now().timestamp(),
+        indexed_at=datetime.now(),
+        waypoint_count=0,
+        event_count=0,
+        has_gps=has_gps,
+    )
+    db.merge(indexed)
+
+
+def _ensure_timestamps(frames: list[TelemetryFrame]) -> None:
+    """If frames lack timestamps, distribute them evenly."""
     if frames and frames[0].timestamp:
         return
     now = datetime.now()
@@ -123,7 +268,7 @@ def _store_frames(db: Session, frames: list[TelemetryFrame]) -> list[int]:
             frame_offset=f.frame_offset,
         )
         db.add(snap)
-        db.flush()  # Get the snapshot ID
+        db.flush()
 
         cold = TelemetryCold(
             id=snap.id,

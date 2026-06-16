@@ -367,6 +367,7 @@ def _decode_sei_nal(nal_data: bytes) -> Optional[object]:
 def extract_sei_messages(
     video_path: str,
     sample_rate: int = 30,
+    max_walk_bytes: int | None = None,
 ) -> Generator[TelemetryFrame, None, None]:
     """Extract telemetry frames from a Tesla dashcam MP4 file.
 
@@ -374,6 +375,8 @@ def extract_sei_messages(
     memory-efficient scanning of large files.
 
     Args:
+        max_walk_bytes: Stop walking mdat after this many bytes.
+            Use for fast peeks (e.g. stationary detection).
         video_path: Path to the MP4 file.
         sample_rate: Only process every Nth frame (30 = ~1/sec at 30fps).
     """
@@ -412,6 +415,13 @@ def extract_sei_messages(
         # MP4 uses LENGTH-PREFIXED NAL units (not Annex B start codes)
         cursor = mdat["start"]
         end = mdat["end"]
+
+        # Apply max_walk_bytes limit for fast peeks
+        if max_walk_bytes is not None and max_walk_bytes > 0:
+            walk_stop = mdat["start"] + max_walk_bytes
+            if walk_stop < end:
+                end = walk_stop
+
         frame_index = 0
         cumulative_time_ms = 0.0
 
