@@ -80,7 +80,9 @@
       "Bash(where python3 *)",
       "Bash(/c/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe --version)",
       "Bash(/c/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe *)",
-      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 pi@192.168.8.178 \"echo connected\")"
+      "Bash(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 pi@192.168.8.178 \"echo connected\")",
+      "Bash(bash -n \"C:/Users/Richard/OneDrive/Desktop/Tesla Journey OS/deploy/edit_usb.sh\")",
+      "Bash(PYTHONPATH=\"backend\" \"C:/Users/Richard/AppData/Local/Programs/Python/Python312/python.exe\" -m pytest tests/ -v --tb=short)"
     ]
   }
 }

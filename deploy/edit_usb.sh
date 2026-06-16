@@ -39,9 +39,11 @@ if [ -f "$GADGET_PATH/UDC" ]; then
 fi
 
 # ── Clear LUN files (releases kernel references) ──
-for lun in "$GADGET_PATH"/functions/mass_storage.usb0/lun.* 2>/dev/null; do
+shopt -s nullglob 2>/dev/null || true
+for lun in "$GADGET_PATH"/functions/mass_storage.usb0/lun.*; do
     [ -f "$lun/file" ] && echo "" > "$lun/file" 2>/dev/null || true
 done
+shopt -u nullglob 2>/dev/null || true
 sleep 0.2
 
 # ── Clean up loop devices ──
